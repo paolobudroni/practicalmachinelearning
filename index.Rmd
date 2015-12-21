@@ -1,0 +1,286 @@
+---
+title: "ProjectCourse Pratical Machine Learning"
+author: "Paolino Massimo Budroni"
+date: "27 dicembre 2015"
+output: html_document
+---
+
+Background
+----------
+
+Using devices such as *Jawbone Up, Nike FuelBand*, and *Fitbit* it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify *how well they do it*. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.  
+More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset). 
+
+
+Data  
+----
+
+The data for this project come from this source: <http://groupware.les.inf.puc-rio.br/har>     
+The training data for this project are available here: 
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+The test data are available here: 
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>  
+
+Given both training and test data from the following study:   
+*Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity
+Recognition of Weight Lifting Exercises.   
+Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI,
+2013.*  
+
+Question  
+--------
+The goal of your project is to predict the manner in which they did the exercise. 
+This is the "classe" variable in the training set.   
+To answer to the above question, this report will show how to build the model, how to use cross validation, the expected out of sample error is and how is done the final choice. 
+The final report will be available through a link to the github repository.  
+According to the study, the Classe Variable describes the way to do the excercises as following:  
+
+* Class A: according to the specification;
+* Class b: throwing the elbows to the front;
+* Class C: lifting the dumbbell only halfway;
+* Class D: lowering the dumbbell only halfway;
+* Class E: throwing the hips to the front.  
+
+Class A corresponds to the specified execution of the
+exercise, while the other 4 classes correspond to common mistakes.
+
+Input Data
+----------
+
+#### Load the appropriate Packges
+
+```{r} 
+library(AppliedPredictiveModeling)
+library(caret)
+library(rattle)
+library(rpart.plot)
+library(randomForest)
+```  
+  
+#### Download and import of the Training and Testing Sets
+
+```{r}
+# Download data.
+url_training <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+file_training <- "pml_training.csv"
+#download.file(url=url_training,destfile=file_training)
+url_testing <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+file_testing <- "pml_testing.csv"
+#download.file(url=url_testing,destfile=file_testing)
+
+# Import the data treating empty values as NA.
+pml_training <- read.csv(file_training, na.strings=c("NA","","#DIV/0!"), sep=",",header=TRUE)
+pml_testing <- read.csv(file_testing, na.strings=c("NA","","#DIV/0!"), sep=",",header=TRUE)
+```  
+  
+  
+#### Creating Training e Testing Sets from the pml_training data
+The training set will be reduced by half size because of performance reason while running the Random Forest Algorithm. 
+The reduction will be done using the *sample* statement.  
+The training Set will be partioned in 2 further sets, 70% training set and 30% testing set.
+
+```{r}
+#sampling the pml_training
+ss <- sample(1:dim(pml_training)[1],dim(pml_training)[1]/2)
+pml_r_training <- pml_training[ss,]
+inTrain <- createDataPartition(pml_r_training$classe, p=0.7, list=FALSE)
+new_training <- pml_r_training[inTrain, ]
+new_testing <- pml_r_training[-inTrain, ]
+dim(new_training)
+dim(new_testing)
+```  
+
+#### Idenfifying good features 
+The next section we will run some code to identified and remove columns.
+
+##### Removing columns with many NAs values. Assumes as threshold 70% of the training observations.
+
+```{r} 
+#create a vector with the columns indexes
+cut_col <- c()
+nrows <- nrow(new_training)
+for(i in 1:length(new_training)) {
+  if( sum( is.na( new_training[, i] ) ) /nrow(new_training) >= .7 ) {
+    cut_col <- c(cut_col,i)
+  }
+}  
+
+new_training_v2 <- new_training[,-cut_col]
+new_testing_v2 <- new_testing[,-cut_col]
+
+```
+
+##### Removing the first 7 columns that are not useful to predict the classe outcome.
+
+```{r}
+#removing the first 7 columns
+new_training <- new_training_v2[,-c(1:7)]
+new_testing <- new_testing_v2[,-c(1:7)]
+
+#removing unnecessary data frames
+rm(new_training_v2)
+rm(new_testing_v2)
+
+dim(new_testing)
+#last columns is the Class Predictor
+#application of the above predictors reduction to the original testing data set
+
+test_colNames <- colnames(new_testing[,-53])
+pml_testing <- pml_testing[,test_colNames]
+dim(pml_testing)
+
+```
+
+##### Identifying those columns with Near Zero variance
+
+```{r}
+nzv <- nearZeroVar(new_training,saveMetrics=TRUE)
+table(nzv$nzv)
+```  
+
+The above result shows that *The Near Zero Variance* variables are FALSE, this means that there is no need to eliminate any covariates due to lack of variability.
+
+#### Building the Model 
+
+Finally we have training a testing set reduced eliminiting the predictors identified by the above illustrated reduction/transformation steps.
+
+Also the final testing set (*as downloaded from the URL above mentioned*) has been reduced to the same predictors set of the training set.
+
+Now are ready to build the model.  
+We will try first to build a *classification trees* and then to build a *random forest* with *cross validation*.
+
+##### Classification Trees
+
+```{r}
+set.seed(125)
+modFit <- train(classe ~ ., data=new_training, method="rpart")
+print(modFit, digits=3)
+
+#call to see the fancy Rpart Plot
+fancyRpartPlot(modFit$finalModel)
+
+print(modFit$finalModel, digits=3)
+
+```  
+
+Running the Prediction on the new_testing set and printing the Confusion Matrix
+
+```{r}
+predictions <- predict(modFit, newdata=new_testing)
+print(confusionMatrix(predictions, new_testing$classe), digits=3)
+```  
+
+We see the Accuracy Rate for this model is low. Given this poor result we try to build an CART model with a preprocess and if this not improved the model we try again including also Cross Validation.
+
+```{r}
+# new model with preprocessing
+set.seed(125)
+modFit <- train(classe ~ ., preProcess=c("center","scale"), data=new_training, method="rpart")
+print(modFit, digits=3)
+
+#running the prediction and the ConfusionMatrix to see if the Accuracy rate improves
+predictions <- predict(modFit, newdata=new_testing)
+print(confusionMatrix(predictions, new_testing$classe), digits=3)
+
+```  
+ 
+ 
+It seems that preprocessing doesn't improve the Accuracy Rate. Let's try with the Cross Validation.
+
+```{r}
+# new model with Cross Validation
+set.seed(125)
+modFit <- train(classe ~ ., trControl=trainControl(method = "cv",number = 4), data=new_training, method="rpart")
+print(modFit, digits=3)
+
+#running the prediction and the ConfusionMatrix to see if the Accuracy rate improves
+predictions <- predict(modFit, newdata=new_testing)
+print(confusionMatrix(predictions, new_testing$classe), digits=3)
+
+```  
+
+Not significant improvment has been introduced with the Cross Validation.
+Let us try with both Preprocessing and Cross Validation.
+
+```{r}
+# new model with preprocessing and Cross Validation
+set.seed(125)
+modFit <- train(classe ~ ., preProcess=c("center","scale"), trControl=trainControl(method = "cv",number = 4), data=new_training, method="rpart")
+print(modFit, digits=3)
+
+#running the prediction and the ConfusionMatrix to see if the Accuracy rate improves
+predictions <- predict(modFit, newdata=new_testing)
+print(confusionMatrix(predictions, new_testing$classe), digits=3)
+
+```  
+
+As we can see from the above prints, it seems that incoroporating both preprocessing and cross validation doesn't show relevant improvement. We see the accuracy rate is still on the same value as produced by the model without preprocessing and/or cross validation method.
+
+Let us try changing the model to the Random Forest.
+
+### Random Forest
+
+We try using the Random Forest Algorithm with Cross Validation and PreProcessing
+
+```{r}
+# new model with Cross Validation and PreProcessing
+set.seed(125)
+modFit <- train(classe ~ ., preProcess=c("center","scale"), trControl=trainControl(method = "cv",number = 4), data=new_training, method="rf")
+print(modFit, digits=3)
+
+#running the prediction and the ConfusionMatrix to see if the Accuracy rate improves
+predictions <- predict(modFit, newdata=new_testing)
+print(confusionMatrix(predictions, new_testing$classe), digits=3)
+
+```  
+
+The Accuracy Rate is significantly improved against the one obtained with the CART algorithm.
+For this reason we will definetely be using the Rando Forest algorithm.
+The only point to decide is if build the model with Cross Validation only or with both CV and PreProcessing. 
+Let's build the one with only the Cross Validation.
+
+```{r}
+# new model with Cross Validation
+set.seed(125)
+modFit <- train(classe ~ ., trControl=trainControl(method = "cv",number = 4), data=new_training, method="rf")
+print(modFit, digits=3)
+
+#running the prediction and the ConfusionMatrix to see if the Accuracy rate improves
+predictions <- predict(modFit, newdata=new_testing)
+print(confusionMatrix(predictions, new_testing$classe), digits=3)
+
+```  
+
+It seems that incorporating the preProcess it lead to a lower Accuracy Rate against the one obtained with only the Cross Validation. 
+For this reason I do a final choice with the model obtained using the Random Forest Algorithm with a Cross Validation, 
+
+### Out of Sample Error 
+
+The Out of Sample Error is the Error Rate obtained on new data, in our case, is the error obtained predicting the model on the testing data.
+The finale Model choosen *Random Forest with Cross Validation* lead to an Out of Sample Error equal to 1-0.984=0.016.
+
+### Prediction of the 20 Testing observation (as from the download)
+
+```{r}
+# prediction of the 20 testing set
+set.seed(125)
+#running the prediction and the ConfusionMatrix to see if the Accuracy rate improves
+predict_20test <- predict(modFit, newdata=pml_testing)
+print(predict_20test)
+
+```  
+
+### Conclusion 
+
+Starting from the training and testing set download from the above mentioned study we have tried to fit a model with *CART* and *RANDOM FOREST* algorithms. Before to do this the training set has been cleaned removing columns with more than 70% of NA values. For perfomance reason (I have run the code on a laptop with core i5, 8 GB ram and Windows 7) the training set has reduced by half using the sample statement. 
+Then it has been applied first the CART algorithm but it has shown us the Accuracy Rate is very low, approx 50%, which means an Out of Sample Error approx 50%. Too much!!
+
+I have moved to use the Random Forest introducing Cross Validation and PreProcessing, this last one seems to low the Accuracy Rate obtained with only the Cross Validation.
+
+The Out of Sample Error rate is approx. 1.6%, which is definetely better the one obtained with the CART algorithm.
+
+The prediction of the 20 test cases shows us the option A is 35% and option B is 40%.
+The study tells us A is the right way to do the excercises while the option B it seems to be the most common predictable mistake. 
